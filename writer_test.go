@@ -44,13 +44,13 @@ func TestCreateMediaPlaylistWithWrongSize(t *testing.T) {
 // Tests the last method on media playlist
 func TestLastSegmentMediaPlaylist(t *testing.T) {
 	p, _ := NewMediaPlaylist(5, 5)
-	if p.last() != 4 {
-		t.Errorf("last is %v, expected: 4", p.last())
+	if p.LastIndex() != 4 {
+		t.Errorf("last is %v, expected: 4", p.LastIndex())
 	}
 	for i := uint(0); i < 5; i++ {
 		_ = p.Append("uri.ts", 4, "")
-		if p.last() != i {
-			t.Errorf("last is: %v, expected: %v", p.last(), i)
+		if p.LastIndex() != i {
+			t.Errorf("last is: %v, expected: %v", p.LastIndex(), i)
 		}
 	}
 }
