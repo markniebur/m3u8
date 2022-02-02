@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sosodev/duration"
 )
 
 var reKeyValue = regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
@@ -735,6 +737,50 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 		state.scte = new(SCTE)
 		state.scte.Syntax = SCTE35_OATCLS
 		state.scte.CueType = SCTE35Cue_End
+
+	case !state.tagSCTE35 &&
+		(strings.HasPrefix(line, "#EXT-X-CUE-OUT:") ||
+			strings.HasPrefix(line, "#EXT-X-CUE-SPAN:") ||
+			strings.HasPrefix(line, "#EXT-X-CUE-IN:")):
+
+		// #EXT-X-CUE-OUT:ID=1074114228,SEGDESC=Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=,SEGTYPEID=52,DURATION=PT2M0.767S,UPID=0000000039ebbab5
+		// #EXT-X-CUE-SPAN:ID=1074114228,SEGDESC=Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=,SEGTYPEID=52,TIMEFROMSIGNAL=PT2.002S,DURATION=PT2M0.767S,UPID=0000000039ebbab5
+		// #EXT-X-CUE-IN:ID=1074114228,SEGDESC=Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=,SEGTYPEID=52,DURATION=PT2M0.767S,UPID=0000000039ebbab5
+
+		state.tagSCTE35 = true
+		state.scte = new(SCTE)
+		state.scte.Syntax = SCTE35_ENVIVIO
+
+		if strings.HasPrefix(line, "#EXT-X-CUE-OUT:") {
+			state.scte.CueType = SCTE35Cue_Start
+		} else if strings.HasPrefix(line, "#EXT-X-CUE-SPAN:") {
+			state.scte.CueType = SCTE35Cue_Mid
+		} else if strings.HasPrefix(line, "#EXT-X-CUE-IN:") {
+			state.scte.CueType = SCTE35Cue_End
+		}
+
+		for attribute, value := range decodeParamsLine(line[strings.Index(line, ":"):]) {
+			switch attribute {
+			case "ID":
+				state.scte.ID = value
+			case "SEGDESC":
+				state.scte.SegDesc = value
+			case "SEGTYPEID":
+				tmp, _ := strconv.ParseUint(value, 10, 8)
+				state.scte.SegDescType = uint8(tmp)
+			case "DURATION":
+				if d, err := duration.Parse(value); err == nil {
+					state.scte.Duration = d.ToTimeDuration()
+				}
+			case "TIMEFROMSIGNAL":
+				if d, err := duration.Parse(value); err == nil {
+					state.scte.TimeFromSignal = d.ToTimeDuration()
+				}
+			case "UPID":
+				state.scte.UPID = value
+			}
+		}
+
 	case !state.tagDiscontinuity && strings.HasPrefix(line, "#EXT-X-DISCONTINUITY"):
 		state.tagDiscontinuity = true
 		state.listType = MEDIA

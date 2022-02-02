@@ -18,6 +18,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDecodeMasterPlaylist(t *testing.T) {
@@ -562,6 +564,35 @@ func TestMediaPlaylistWithOATCLSSCTE35Tag(t *testing.T) {
 			)
 		}
 	}
+}
+
+func TestMediaPlaylistWithEnvivioSCTE35Tag(t *testing.T) {
+	f, err := os.Open("sample-playlists/media-playlist-with-scte35-envivio.m3u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := DecodeFrom(bufio.NewReader(f), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pp := p.(*MediaPlaylist)
+	for i := 0; i < int(pp.Count()); i++ {
+		segment := pp.Segments[i]
+		assert.NotNil(t, segment.SCTE)
+		assert.NotNil(t, segment.SCTE)
+		assert.Equal(t, "1074114228", segment.SCTE.ID)
+		assert.Equal(t, "Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=", segment.SCTE.SegDesc)
+		assert.Equal(t, uint8(52), segment.SCTE.SegDescType)
+		assert.Equal(t, int64(120767), segment.SCTE.Duration.Milliseconds())
+		assert.Equal(t, "0000000039ebbab5", segment.SCTE.UPID)
+		assert.True(t, segment.SCTE.TimeFromSignal >= 0)
+	}
+
+	assert.Equal(t, SCTE35Cue_Start, pp.Segments[0].SCTE.CueType)
+	for i := 1; i < int(pp.Count())-1; i++ {
+		assert.Equal(t, SCTE35Cue_Mid, pp.Segments[i].SCTE.CueType)
+	}
+	assert.Equal(t, SCTE35Cue_End, pp.Segments[pp.Count()-1].SCTE.CueType)
 }
 
 func TestDecodeMediaPlaylistWithDiscontinuitySeq(t *testing.T) {
