@@ -571,14 +571,14 @@ func TestMediaPlaylistWithEnvivioSCTE35Tag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, _, err := DecodeFrom(bufio.NewReader(f), true)
+	defer f.Close()
+	pp, _ := NewMediaPlaylist(10, 100)
+	err = pp.DecodeFrom(bufio.NewReader(f), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pp := p.(*MediaPlaylist)
 	for i := 0; i < int(pp.Count()); i++ {
 		segment := pp.Segments[i]
-		assert.NotNil(t, segment.SCTE)
 		assert.NotNil(t, segment.SCTE)
 		assert.Equal(t, "1074114228", segment.SCTE.ID)
 		assert.Equal(t, "Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=", segment.SCTE.SegDesc)
