@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sosodev/duration"
 )
 
 var reKeyValue = regexp.MustCompile(`([a-zA-Z0-9_-]+)=("[^"]+"|[^",]+)`)
@@ -217,7 +219,7 @@ func decode(buf *bytes.Buffer, strict bool, customDecoders []CustomDecoder) (Pla
 	master = NewMasterPlaylist()
 	media, err = NewMediaPlaylist(8, 1024) // Winsize for VoD will become 0, capacity auto extends
 	if err != nil {
-		return nil, 0, fmt.Errorf("Create media playlist failed: %s", err)
+		return nil, 0, fmt.Errorf("create media playlist failed: %s", err)
 	}
 
 	// If we have custom tags to parse
@@ -274,7 +276,7 @@ func decode(buf *bytes.Buffer, strict bool, customDecoders []CustomDecoder) (Pla
 		}
 		return media, MEDIA, nil
 	}
-	return nil, state.listType, errors.New("Can't detect playlist type")
+	return nil, state.listType, errors.New("can't detect playlist type")
 }
 
 // DecodeAttributeList turns an attribute list into a key, value map. You should trim
@@ -507,7 +509,7 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 		duration := line[8:sepIndex]
 		if len(duration) > 0 {
 			if state.duration, err = strconv.ParseFloat(duration, 64); strict && err != nil {
-				return fmt.Errorf("Duration parsing error: %s", err)
+				return fmt.Errorf("duration parsing error: %s", err)
 			}
 		}
 		if len(line) > sepIndex {
@@ -632,7 +634,7 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 			case "TIME-OFFSET":
 				st, err := strconv.ParseFloat(v, 64)
 				if err != nil {
-					return fmt.Errorf("Invalid TIME-OFFSET: %s: %v", v, err)
+					return fmt.Errorf("invalid TIME-OFFSET: %s: %v", v, err)
 				}
 				p.StartTime = st
 			case "PRECISE":
@@ -666,7 +668,7 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 				state.xmap.URI = v
 			case "BYTERANGE":
 				if _, err = fmt.Sscanf(v, "%d@%d", &state.xmap.Limit, &state.xmap.Offset); strict && err != nil {
-					return fmt.Errorf("Byterange sub-range length value parsing error: %s", err)
+					return fmt.Errorf("byterange sub-range length value parsing error: %s", err)
 				}
 			}
 		}
@@ -683,11 +685,11 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 		state.offset = 0
 		params := strings.SplitN(line[17:], "@", 2)
 		if state.limit, err = strconv.ParseInt(params[0], 10, 64); strict && err != nil {
-			return fmt.Errorf("Byterange sub-range length value parsing error: %s", err)
+			return fmt.Errorf("byterange sub-range length value parsing error: %s", err)
 		}
 		if len(params) > 1 {
 			if state.offset, err = strconv.ParseInt(params[1], 10, 64); strict && err != nil {
-				return fmt.Errorf("Byterange sub-range offset value parsing error: %s", err)
+				return fmt.Errorf("byterange sub-range offset value parsing error: %s", err)
 			}
 		}
 	case !state.tagSCTE35 && strings.HasPrefix(line, "#EXT-SCTE35:"):
@@ -735,6 +737,50 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 		state.scte = new(SCTE)
 		state.scte.Syntax = SCTE35_OATCLS
 		state.scte.CueType = SCTE35Cue_End
+
+	case !state.tagSCTE35 &&
+		(strings.HasPrefix(line, "#EXT-X-CUE-OUT:") ||
+			strings.HasPrefix(line, "#EXT-X-CUE-SPAN:") ||
+			strings.HasPrefix(line, "#EXT-X-CUE-IN:")):
+
+		// #EXT-X-CUE-OUT:ID=1074114228,SEGDESC=Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=,SEGTYPEID=52,DURATION=PT2M0.767S,UPID=0000000039ebbab5
+		// #EXT-X-CUE-SPAN:ID=1074114228,SEGDESC=Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=,SEGTYPEID=52,TIMEFROMSIGNAL=PT2.002S,DURATION=PT2M0.767S,UPID=0000000039ebbab5
+		// #EXT-X-CUE-IN:ID=1074114228,SEGDESC=Ah5DVUVJQAWutH_PAACl2U0ICAAAAAA567q1NAAAAAA=,SEGTYPEID=52,DURATION=PT2M0.767S,UPID=0000000039ebbab5
+
+		state.tagSCTE35 = true
+		state.scte = new(SCTE)
+		state.scte.Syntax = SCTE35_ENVIVIO
+
+		if strings.HasPrefix(line, "#EXT-X-CUE-OUT:") {
+			state.scte.CueType = SCTE35Cue_Start
+		} else if strings.HasPrefix(line, "#EXT-X-CUE-SPAN:") {
+			state.scte.CueType = SCTE35Cue_Mid
+		} else if strings.HasPrefix(line, "#EXT-X-CUE-IN:") {
+			state.scte.CueType = SCTE35Cue_End
+		}
+
+		for attribute, value := range decodeParamsLine(line[strings.Index(line, ":"):]) {
+			switch attribute {
+			case "ID":
+				state.scte.ID = value
+			case "SEGDESC":
+				state.scte.SegDesc = value
+			case "SEGTYPEID":
+				tmp, _ := strconv.ParseUint(value, 10, 8)
+				state.scte.SegDescType = uint8(tmp)
+			case "DURATION":
+				if d, err := duration.Parse(value); err == nil {
+					state.scte.Duration = d.ToTimeDuration()
+				}
+			case "TIMEFROMSIGNAL":
+				if d, err := duration.Parse(value); err == nil {
+					state.scte.TimeFromSignal = d.ToTimeDuration()
+				}
+			case "UPID":
+				state.scte.UPID = value
+			}
+		}
+
 	case !state.tagDiscontinuity && strings.HasPrefix(line, "#EXT-X-DISCONTINUITY"):
 		state.tagDiscontinuity = true
 		state.listType = MEDIA
